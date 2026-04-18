@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Plumber's Workbench</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --panel: #12121a;
+    --text: #00ffcc;
+    --error: #ff3366;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: monospace;
+    margin: 0;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+  #sidebar {
+    width: 400px;
+    background: var(--panel);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #333;
+    box-sizing: border-box;
+  }
+  #canvas-container {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+  }
+  canvas {
+    border: 1px solid #333;
+    max-width: 100%;
+    max-height: 100%;
+  }
+  textarea {
+    background: #000;
+    color: #00ffcc;
+    font-family: monospace;
+    border: 1px solid #333;
+    padding: 10px;
+    height: 300px;
+    width: 100%;
+    resize: vertical;
+    box-sizing: border-box;
+    font-size: 13px;
+  }
+  button {
+    background: var(--text);
+    color: #000;
+    border: none;
+    padding: 10px;
+    cursor: pointer;
+    font-weight: bold;
+    margin-top: 10px;
+  }
+  button:hover { background: #fff; }
+  .slider-group { margin-bottom: 10px; }
+  label { display: block; margin-bottom: 5px; font-size: 11px; color: #888; }
+  input[type=range] { width: 100%; }
+  #log { color: var(--error); margin-top: 10px; font-size: 12px; white-space: pre-wrap;}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>PIPE CONSTRAINTS</h2>
+  <p style="font-size: 11px; color: #888;">Adjust the "frozen" neural weights (Keys) that feed the drain.</p>
+  
+  <div class="slider-group">
+    <label>Lambda (Blend): <span id="val-lambda">0.50</span></label>
+    <input type="range" id="sl-lambda" min="0" max="1" step="0.01" value="0.5">
+  </div>
+  <div class="slider-group">
+    <label>K1 Phase: <span id="val-k1">0.00</span></label>
+    <input type="range" id="sl-k1" min="0" max="6.28" step="0.01" value="0.0">
+  </div>
+  <div class="slider-group">
+    <label>K2 Phase: <span id="val-k2">2.09</span></label>
+    <input type="range" id="sl-k2" min="0" max="6.28" step="0.01" value="2.09">
+  </div>
+  <div class="slider-group">
+    <label>K3 Phase: <span id="val-k3">4.18</span></label>
+    <input type="range" id="sl-k3" min="0" max="6.28" step="0.01" value="4.18">
+  </div>
+
+  <h2 style="margin-top: 20px;">ITERATION LOOP</h2>
+  <p style="font-size: 11px; color: #888;">Write your own physics. Return the next 'z'. <br>Available vars: z, c, k1, k2, k3, lambda.</p>
+  <textarea id="codebox">
+// Pure Mandelbrot (The classic drain)
+let z2c = z.mul(z).add(c);
+
+// Neural Attention Perturbation 
+// (What happens when we mix in the weights)
+let dir = k1.add(k2).add(k3);
+let r = z.mag() * z.mag() + dir.mag();
+let phi = 2.0 * dir.arg() + c.arg();
+let fs = new Complex(r * Math.cos(phi), r * Math.sin(phi)).add(c);
+
+// Return the blended reality
+return z2c.scale(1 - lambda).add(fs.scale(lambda));
+</textarea>
+  <button id="btn-render">COMPILE & RENDER</button>
+  <div id="log"></div>
+</div>
+
+<div id="canvas-container">
+  <canvas id="fractal" width="600" height="600"></canvas>
+</div>
+
+<script>
+// --- Complex Math Library (The Plumbing Tools) ---
+class Complex {
+  constructor(re, im) { this.re = re; this.im = im; }
+  add(other) { return new Complex(this.re + other.re, this.im + other.im); }
+  sub(other) { return new Complex(this.re - other.re, this.im - other.im); }
+  mul(other) { return new Complex(this.re * other.re - this.im * other.im, this.re * other.im + this.im * other.re); }
+  scale(s) { return new Complex(this.re * s, this.im * s); }
+  mag() { return Math.sqrt(this.re * this.re + this.im * this.im); }
+  arg() { return Math.atan2(this.im, this.re); }
+  div(other) {
+    let denom = other.re * other.re + other.im * other.im;
+    if (denom === 0) return new Complex(NaN, NaN); // OVERFLOW TRIGGER
+    return new Complex((this.re * other.re + this.im * other.im) / denom, (this.im * other.re - this.re * other.im) / denom);
+  }
+}
+
+const canvas = document.getElementById('fractal');
+const ctx = canvas.getContext('2d');
+let imgData = ctx.createImageData(canvas.width, canvas.height);
+
+function updateLabels() {
+  document.getElementById('val-lambda').innerText = document.getElementById('sl-lambda').value;
+  document.getElementById('val-k1').innerText = document.getElementById('sl-k1').value;
+  document.getElementById('val-k2').innerText = document.getElementById('sl-k2').value;
+  document.getElementById('val-k3').innerText = document.getElementById('sl-k3').value;
+}
+
+document.querySelectorAll('input').forEach(el => el.addEventListener('input', () => {
+  updateLabels();
+  render();
+}));
+
+function getKeys() {
+  let p1 = parseFloat(document.getElementById('sl-k1').value);
+  let p2 = parseFloat(document.getElementById('sl-k2').value);
+  let p3 = parseFloat(document.getElementById('sl-k3').value);
+  // Simulating neural amplitude locked at 1.0 for simplicity
+  return [
+    new Complex(Math.cos(p1), Math.sin(p1)),
+    new Complex(Math.cos(p2), Math.sin(p2)),
+    new Complex(Math.cos(p3), Math.sin(p3))
+  ];
+}
+
+function render() {
+  const code = document.getElementById('codebox').value;
+  let userFunc;
+  try {
+    userFunc = new Function('z', 'c', 'k1', 'k2', 'k3', 'lambda', 'Complex', code);
+    document.getElementById('log').innerText = "";
+  } catch (e) {
+    document.getElementById('log').innerText = "COMPILE ERROR:\n" + e.message;
+    return;
+  }
+
+  const keys = getKeys();
+  const k1 = keys[0], k2 = keys[1], k3 = keys[2];
+  const lambda = parseFloat(document.getElementById('sl-lambda').value);
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const maxIter = 40; // Kept low to prevent browser freezing while hacking
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Map pixel to complex plane (-2 to 1 on X, -1.5 to 1.5 on Y)
+      let cx = -2.0 + (x / w) * 3.0;
+      let cy = -1.5 + (y / h) * 3.0;
+      let c = new Complex(cx, cy);
+      let z = new Complex(0, 0);
+      
+      let i = 0;
+      let isNaN = false;
+
+      for (; i < maxIter; i++) {
+        try {
+          z = userFunc(z, c, k1, k2, k3, lambda, Complex);
+          if (Number.isNaN(z.re) || Number.isNaN(z.im)) {
+             isNaN = true;
+             break; // Overflow caught
+          }
+          if (z.mag() > 10.0) break; // Escaped the drain
+        } catch (e) {
+          document.getElementById('log').innerText = "RUNTIME ERROR:\n" + e.message;
+          return;
+        }
+      }
+
+      let p = (y * w + x) * 4;
+      if (isNaN) {
+        // NaNs and Overflows render as pure ERROR RED
+        imgData.data[p] = 255; imgData.data[p+1] = 0; imgData.data[p+2] = 50; imgData.data[p+3] = 255;
+      } else if (i === maxIter) {
+        // Frozen (Bounded) renders as Black
+        imgData.data[p] = 0; imgData.data[p+1] = 0; imgData.data[p+2] = 0; imgData.data[p+3] = 255;
+      } else {
+        // Flowing (Escaped) renders as purple/blue based on how fast it escaped
+        let color = Math.floor((i / maxIter) * 255);
+        imgData.data[p] = color; imgData.data[p+1] = 20; imgData.data[p+2] = 255 - color; imgData.data[p+3] = 255;
+      }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
+document.getElementById('btn-render').addEventListener('click', render);
+updateLabels();
+render();
+
+</script>
+</body>
+</html>
