@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>The Plumber's Workbench</title>
+<title>The Plumber's Workbench - V2</title>
 <style>
   :root {
     --bg: #0a0a0f;
@@ -28,6 +28,7 @@
     flex-direction: column;
     border-right: 1px solid #333;
     box-sizing: border-box;
+    overflow-y: auto;
   }
   #canvas-container {
     flex-grow: 1;
@@ -35,11 +36,16 @@
     align-items: center;
     justify-content: center;
     background: #000;
+    position: relative;
   }
   canvas {
     border: 1px solid #333;
     max-width: 100%;
     max-height: 100%;
+    cursor: grab;
+  }
+  canvas:active {
+    cursor: grabbing;
   }
   textarea {
     background: #000;
@@ -47,11 +53,11 @@
     font-family: monospace;
     border: 1px solid #333;
     padding: 10px;
-    height: 300px;
+    height: 250px;
     width: 100%;
     resize: vertical;
     box-sizing: border-box;
-    font-size: 13px;
+    font-size: 12px;
   }
   button {
     background: var(--text);
@@ -61,12 +67,16 @@
     cursor: pointer;
     font-weight: bold;
     margin-top: 10px;
+    width: 100%;
   }
   button:hover { background: #fff; }
+  .btn-secondary { background: #333; color: var(--text); }
+  .btn-secondary:hover { background: #444; }
   .slider-group { margin-bottom: 10px; }
   label { display: block; margin-bottom: 5px; font-size: 11px; color: #888; }
   input[type=range] { width: 100%; }
-  #log { color: var(--error); margin-top: 10px; font-size: 12px; white-space: pre-wrap;}
+  #log { color: var(--error); margin-top: 10px; font-size: 11px; white-space: pre-wrap; }
+  #viewport-info { font-size: 11px; color: #888; margin-top: 10px; background: #000; padding: 10px; border: 1px solid #333;}
 </style>
 </head>
 <body>
@@ -93,22 +103,33 @@
   </div>
 
   <h2 style="margin-top: 20px;">ITERATION LOOP</h2>
-  <p style="font-size: 11px; color: #888;">Write your own physics. Return the next 'z'. <br>Available vars: z, c, k1, k2, k3, lambda.</p>
+  <p style="font-size: 11px; color: #888;">Write your own physics. Return the next 'z'.</p>
   <textarea id="codebox">
 // Pure Mandelbrot (The classic drain)
 let z2c = z.mul(z).add(c);
 
 // Neural Attention Perturbation 
-// (What happens when we mix in the weights)
 let dir = k1.add(k2).add(k3);
 let r = z.mag() * z.mag() + dir.mag();
 let phi = 2.0 * dir.arg() + c.arg();
 let fs = new Complex(r * Math.cos(phi), r * Math.sin(phi)).add(c);
 
+// Cause a NaN explosion right at the origin:
+// let danger = z.div(c); 
+// return z2c.add(danger.scale(lambda));
+
 // Return the blended reality
 return z2c.scale(1 - lambda).add(fs.scale(lambda));
 </textarea>
   <button id="btn-render">COMPILE & RENDER</button>
+  <button id="btn-reset" class="btn-secondary">RESET VIEW</button>
+  
+  <div id="viewport-info">
+    X: 0.00000<br>
+    Y: 0.00000<br>
+    Scale: 3.00000
+  </div>
+  
   <div id="log"></div>
 </div>
 
@@ -137,11 +158,21 @@ const canvas = document.getElementById('fractal');
 const ctx = canvas.getContext('2d');
 let imgData = ctx.createImageData(canvas.width, canvas.height);
 
+// Viewport variables
+let scale = 3.0;
+let offsetX = -2.0;
+let offsetY = -1.5;
+let isDragging = false;
+let lastMouseX = 0;
+let lastMouseY = 0;
+
+// Update UI
 function updateLabels() {
   document.getElementById('val-lambda').innerText = document.getElementById('sl-lambda').value;
   document.getElementById('val-k1').innerText = document.getElementById('sl-k1').value;
   document.getElementById('val-k2').innerText = document.getElementById('sl-k2').value;
   document.getElementById('val-k3').innerText = document.getElementById('sl-k3').value;
+  document.getElementById('viewport-info').innerHTML = `X: ${offsetX.toFixed(5)}<br>Y: ${offsetY.toFixed(5)}<br>Scale: ${scale.toFixed(5)}`;
 }
 
 document.querySelectorAll('input').forEach(el => el.addEventListener('input', () => {
@@ -149,11 +180,66 @@ document.querySelectorAll('input').forEach(el => el.addEventListener('input', ()
   render();
 }));
 
+// Mouse Controls for Panning & Zooming
+canvas.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+});
+
+window.addEventListener('mouseup', () => {
+  isDragging = false;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  const dx = e.clientX - lastMouseX;
+  const dy = e.clientY - lastMouseY;
+  lastMouseX = e.clientX;
+  lastMouseY = e.clientY;
+
+  // Shift offset relative to scale and canvas size
+  offsetX -= dx * (scale / canvas.width);
+  offsetY -= dy * (scale / canvas.height);
+  
+  updateLabels();
+  render();
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const mouseX = e.clientX - rect.left;
+  const mouseY = e.clientY - rect.top;
+
+  // Find complex coordinate under the mouse BEFORE zooming
+  const cMouseX = offsetX + (mouseX / canvas.width) * scale;
+  const cMouseY = offsetY + (mouseY / canvas.height) * scale;
+
+  // Zoom by 10%
+  const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
+  scale *= zoomFactor;
+
+  // Adjust offset so the complex coordinate under the mouse stays exactly the same
+  offsetX = cMouseX - (mouseX / canvas.width) * scale;
+  offsetY = cMouseY - (mouseY / canvas.height) * scale;
+
+  updateLabels();
+  render();
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  scale = 3.0;
+  offsetX = -2.0;
+  offsetY = -1.5;
+  updateLabels();
+  render();
+});
+
 function getKeys() {
   let p1 = parseFloat(document.getElementById('sl-k1').value);
   let p2 = parseFloat(document.getElementById('sl-k2').value);
   let p3 = parseFloat(document.getElementById('sl-k3').value);
-  // Simulating neural amplitude locked at 1.0 for simplicity
   return [
     new Complex(Math.cos(p1), Math.sin(p1)),
     new Complex(Math.cos(p2), Math.sin(p2)),
@@ -178,13 +264,13 @@ function render() {
 
   const w = canvas.width;
   const h = canvas.height;
-  const maxIter = 40; // Kept low to prevent browser freezing while hacking
+  const maxIter = 40; 
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      // Map pixel to complex plane (-2 to 1 on X, -1.5 to 1.5 on Y)
-      let cx = -2.0 + (x / w) * 3.0;
-      let cy = -1.5 + (y / h) * 3.0;
+      // Map pixel using the interactive viewport coordinates
+      let cx = offsetX + (x / w) * scale;
+      let cy = offsetY + (y / h) * scale;
       let c = new Complex(cx, cy);
       let z = new Complex(0, 0);
       
@@ -196,9 +282,9 @@ function render() {
           z = userFunc(z, c, k1, k2, k3, lambda, Complex);
           if (Number.isNaN(z.re) || Number.isNaN(z.im)) {
              isNaN = true;
-             break; // Overflow caught
+             break;
           }
-          if (z.mag() > 10.0) break; // Escaped the drain
+          if (z.mag() > 10.0) break;
         } catch (e) {
           document.getElementById('log').innerText = "RUNTIME ERROR:\n" + e.message;
           return;
@@ -207,13 +293,10 @@ function render() {
 
       let p = (y * w + x) * 4;
       if (isNaN) {
-        // NaNs and Overflows render as pure ERROR RED
         imgData.data[p] = 255; imgData.data[p+1] = 0; imgData.data[p+2] = 50; imgData.data[p+3] = 255;
       } else if (i === maxIter) {
-        // Frozen (Bounded) renders as Black
         imgData.data[p] = 0; imgData.data[p+1] = 0; imgData.data[p+2] = 0; imgData.data[p+3] = 255;
       } else {
-        // Flowing (Escaped) renders as purple/blue based on how fast it escaped
         let color = Math.floor((i / maxIter) * 255);
         imgData.data[p] = color; imgData.data[p+1] = 20; imgData.data[p+2] = 255 - color; imgData.data[p+3] = 255;
       }
