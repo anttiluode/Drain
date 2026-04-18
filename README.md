@@ -4,6 +4,10 @@ https://anttiluode.github.io/Drain/
 
 You can change the generating algorithms to things like: 
 
+
+## Neural Attention Perturbation Variant
+
+```javascript
 // The classic drain
 let z2c = z.mul(z).add(c);
 
@@ -20,5 +24,6 @@ let danger = z.div(c);
 let distorted_fs = fs.add(danger.scale(0.1));
 
 return z2c.scale(1 - lambda).add(distorted_fs.scale(lambda));
+```
 
 Ask from your friendly AI for different possibilities. 
